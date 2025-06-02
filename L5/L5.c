@@ -20,8 +20,12 @@
 char mode = -1;
 char start = 0;
 int adc_result = 0;
-int ADCarray[10] = {0};
 char adc_index = 0;
+
+char adc_count = 10; 
+int adc_threshold = 500;
+
+int ADCarray[10] = {0};
 
 unsigned char buf[8];
 unsigned char bufRX[bufRX_SIZE] = {0};
@@ -54,6 +58,7 @@ void adc_init() {
     ADMUX |= (1 << REFS0); 
     ADCSRA |= (1 << ADEN);
     SFIOR |= (1 << ADTS1) | (1 << ADTS0); 
+}
 
 ISR(TIMER0_COMP_vect) {
     if (start) {
@@ -84,21 +89,40 @@ int UART_receive_cmd(void) {
 void Command_parser(void) {
     while (1) {
         UART_receive_cmd();
-		if (strcmp(bufRX, "start") == 0) {
+        if (strcmp(bufRX, "start") == 0) {
             start = 1;
+            adc_index = 0;
             UART_send_str("Mode: start\r\n");
-        } else if (strcmp(bufRX, "under500") == 0) {
+
+        } else if (strcmp(bufRX, "low") == 0) {
             mode = MODE_LOW;
-            UART_send_str("Mode: under500\r\n");
-        } else if (strcmp(bufRX, "over500") == 0) {
+            UART_send_str("Mode: low\r\n");
+
+        } else if (strcmp(bufRX, "high") == 0) {
             mode = MODE_HIGH;
-            UART_send_str("Mode: over500\r\n");
+            UART_send_str("Mode: high\r\n");
+
         } else if (strcmp(bufRX, "all") == 0) {
             mode = MODE_ALL;
             UART_send_str("Mode: all\r\n");
+
         } else if (strcmp(bufRX, "off") == 0) {
             start = 0;
             UART_send_str("Mode: off\r\n");
+
+        } else if (strncmp(bufRX, "count=", 6) == 0) {
+            adc_count = atoi(bufRX + 6);
+            if (adc_count > 10) adc_count = 10;
+            UART_send_str("Count set\r\n");
+
+        } else if (strncmp(bufRX, "thresh=", 7) == 0) {
+            adc_threshold = atoi(bufRX + 7);
+            UART_send_str("Threshold set\r\n");
+
+        } else if (strcmp(bufRX, "status") == 0) {
+            sprintf(bufTMP, "count=%d thresh=%d\r\n", adc_count, adc_threshold);
+            UART_send_str(bufTMP);
+
         } else {
             UART_send_str("Unknown command\r\n");
         }
@@ -106,11 +130,11 @@ void Command_parser(void) {
 }
 
 ISR(INT0_vect) {
-    if (start && adc_index < 10) {
+    if (start && adc_index < adc_count) {
         ADCSRA |= (1 << ADSC);
         while (ADCSRA & (1 << ADSC));
         ADCarray[adc_index] = ADC;
-        
+
         itoa(ADCarray[adc_index], buf, 10);
         UART_send_str("ADC[");
         UART_send(adc_index + '0');
@@ -118,18 +142,14 @@ ISR(INT0_vect) {
         UART_send_str(buf);
         UART_send_str("\r\n");
 
-        adc_index++; 
+        adc_index++;
     }
 }
-
-
-
-
 
 ISR(INT1_vect) {
 	if(start){
     if (mode == MODE_ALL){
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < adc_count; i++) {
             itoa(ADCarray[i], buf, 10);
             UART_send_str("ADC = ");
             UART_send_str(buf);
@@ -138,8 +158,8 @@ ISR(INT1_vect) {
         }
     }
 	if(mode == MODE_LOW){
-		for (int i = 0; i < 10; i++) {
-			if(ADCarray[i] < 500){
+		for (int i = 0; i < adc_count; i++) {
+			if(ADCarray[i] < adc_threshold){
 				itoa(ADCarray[i], buf, 10);
 				UART_send_str("ADC = ");
 				UART_send_str(buf);
@@ -151,8 +171,8 @@ ISR(INT1_vect) {
         }
 	}
         if(mode == MODE_HIGH){
-			for (int i = 0; i < 10; i++) {
-				if(ADCarray[i] >= 500){
+			for (int i = 0; i < adc_count; i++) {
+				if(ADCarray[i] >= adc_threshold){
 				itoa(ADCarray[i], buf, 10);
 				UART_send_str("ADC = ");
 				UART_send_str(buf);
@@ -163,13 +183,13 @@ ISR(INT1_vect) {
 			}	
 			}
 		}
-	}	
+	}
 }
 
 int main(void) {
-    // Порти
     DDRA = 0x00;    
     DDRD = 0b00000010;
+
     MCUCR &= ~((1 << ISC00) | (1 << ISC01) | (1 << ISC10) | (1 << ISC11));
     MCUCR |= (1 << ISC01) | (1 << ISC00);
     MCUCR |= (1 << ISC11) | (1 << ISC10);
@@ -180,9 +200,7 @@ int main(void) {
     timer0_init_ctc();
 
     sei(); 
-	UART_send_str("System ready.\r\n");
+    UART_send_str("System ready.\r\n");
 
     Command_parser();
 }
-
-
